@@ -28,7 +28,7 @@
   
   let showGridAndFloor = $state(true);
   let showBuildVolume = $state(true);
-  let isLightMode = $state(false);
+  let isLightMode = $state(true);
   let selectedFileForRotation = $state<string | null>(null);
   // Map of meshUuid → warning message (empty string = fits fine)
   let bedWarnings = $state<Map<string, string>>(new Map());
@@ -563,7 +563,7 @@
     if (!canvasContainer || !THREE) return;
     
     scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x09090b);
+    scene.background = new THREE.Color(0xf4f4f5);
 
     camera = new THREE.PerspectiveCamera(45, canvasContainer.clientWidth / canvasContainer.clientHeight, 0.1, 5000);
     camera.position.set(200, 160, 200);
@@ -664,6 +664,9 @@
     controls.minDistance = 20;
     controls.maxDistance = 2000;
     controls.maxPolarAngle = Math.PI / 2 - 0.02;
+
+    // Apply default light mode colours to floor & grid
+    applyLightMode(true);
 
     function animate() {
       requestAnimationFrame(animate);
