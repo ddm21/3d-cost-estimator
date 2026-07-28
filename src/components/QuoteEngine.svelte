@@ -4,11 +4,11 @@
   import Dropdown from './Dropdown.svelte';
 
   // Environment variables for currency
-  const currencySymbol = import.meta.env.PUBLIC_CURRENCY_SYMBOL || '$';
-  const currencyCode = import.meta.env.PUBLIC_CURRENCY_CODE || 'USD';
+  const currencySymbol = import.meta.env.PUBLIC_CURRENCY_SYMBOL || '₹';
+  const currencyCode = import.meta.env.PUBLIC_CURRENCY_CODE || 'INR';
 
   // Svelte 5 Runes for state management
-  let files = $state<{ file: File; volume: number; area: number; meshUuid: string; colorId: string }[]>([]);
+  let files = $state<{ file: File; volume: number; area: number; meshUuid: string; colorId: string; apiData?: { volumeCm3: number; weightG: number; printTime: string } }[]>([]);
   let isDragging = $state(false);
   let isProcessing = $state(false);
   let canvasContainer = $state<HTMLElement | null>(null);
@@ -49,18 +49,21 @@
   let totalEstimatedWeight = $derived(() => {
     if (files.length === 0) return 0;
     
-    // Heuristic Formula
-    const shellVolume = totalSurfaceArea * (quality.shellThickness / 10); // Area in cm², thickness converted mm to cm
-    const solidVolume = totalSolidVolume;
-    
-    // Ensure shell isn't bigger than solid
-    const actualShell = Math.min(shellVolume, solidVolume);
-    const innerVolume = Math.max(0, solidVolume - actualShell);
-    
-    const infillVolume = innerVolume * (infillPercent / 100);
-    const totalVolume = actualShell + infillVolume;
-    
-    return totalVolume * material.density * quantity;
+    let weight = 0;
+    for (const f of files) {
+      if (f.apiData) {
+        // API gives accurate slice volume, we multiply by material density to allow dynamic material switching
+        weight += f.apiData.volumeCm3 * material.density;
+      } else {
+        // Heuristic Formula fallback while slicing
+        const shellVolume = f.area * (quality.shellThickness / 10);
+        const actualShell = Math.min(shellVolume, f.volume);
+        const innerVolume = Math.max(0, f.volume - actualShell);
+        const infillVolume = innerVolume * (infillPercent / 100);
+        weight += (actualShell + infillVolume) * material.density;
+      }
+    }
+    return weight * quantity;
   });
 
   let totalCost = $derived(() => {
@@ -77,13 +80,39 @@
   let technicalStats = $derived(() => {
     if (files.length === 0) return { volumeCm3: 0, printTime: '00:00:00', x: 0, y: 0, z: 0 };
     
-    const weight = totalEstimatedWeight();
-    const finalMaterialVolumeCm3 = weight / material.density;
+    let totalVolumeCm3 = 0;
+    let hasApiData = false;
+    let totalSeconds = 0;
+
+    for (const f of files) {
+      if (f.apiData) {
+        hasApiData = true;
+        totalVolumeCm3 += f.apiData.volumeCm3;
+        
+        // Parse time strings like "1h 2m 3s" or "2m 5s"
+        const pt = f.apiData.printTime;
+        const hMatch = pt.match(/(\d+)h/);
+        const mMatch = pt.match(/(\d+)m/);
+        const sMatch = pt.match(/(\d+)s/);
+        const dMatch = pt.match(/(\d+)d/);
+        
+        if (dMatch) totalSeconds += parseInt(dMatch[1]) * 86400;
+        if (hMatch) totalSeconds += parseInt(hMatch[1]) * 3600;
+        if (mMatch) totalSeconds += parseInt(mMatch[1]) * 60;
+        if (sMatch) totalSeconds += parseInt(sMatch[1]);
+      }
+    }
+
+    if (!hasApiData) {
+      totalVolumeCm3 = totalEstimatedWeight() / (material.density * quantity);
+      const totalVolMm3 = totalVolumeCm3 * 1000;
+      const flowRateMm3PerSec = 5 * (quality.layerHeight / 0.2); 
+      totalSeconds = (totalVolMm3 / flowRateMm3PerSec) + 300;
+    }
     
-    // Time heuristic based on volumetric flow rate
-    const totalVolMm3 = finalMaterialVolumeCm3 * 1000;
-    const flowRateMm3PerSec = 5 * (quality.layerHeight / 0.2); 
-    const totalSeconds = (totalVolMm3 / flowRateMm3PerSec) + 300;
+    totalSeconds *= quantity;
+    totalVolumeCm3 *= quantity;
+
     const h = Math.floor(totalSeconds / 3600);
     const m = Math.floor((totalSeconds % 3600) / 60);
     const printTimeStr = `${h.toString().padStart(2, '0')}h ${m.toString().padStart(2, '0')}m`;
@@ -112,7 +141,7 @@
     const dimZ = box.minX === Infinity ? 0 : (box.maxZ - box.minZ) / 10;
 
     return {
-      volumeCm3: finalMaterialVolumeCm3,
+      volumeCm3: totalVolumeCm3,
       printTime: printTimeStr,
       x: dimX,
       y: dimY,
@@ -145,6 +174,42 @@
       });
     }
   });
+  
+  // Re-slice when infill changes (debounced)
+  let sliceTimeout: any;
+  $effect(() => {
+    const currentInfill = infillPercent;
+    if (files.length > 0) {
+      clearTimeout(sliceTimeout);
+      sliceTimeout = setTimeout(() => {
+        for (const f of files) {
+           sliceFile(f.meshUuid);
+        }
+      }, 800); // 800ms debounce
+    }
+  });
+
+  async function sliceFile(meshUuid: string) {
+    const fIndex = files.findIndex(f => f.meshUuid === meshUuid);
+    if (fIndex === -1) return;
+    
+    const formData = new FormData();
+    formData.append('file', files[fIndex].file);
+    formData.append('infill', infillPercent.toString());
+    
+    try {
+      const res = await fetch('/api/slice', { method: 'POST', body: formData });
+      const json = await res.json();
+      if (json.success) {
+        // Trigger Svelte reactivity by replacing the object in the array
+        const newFiles = [...files];
+        newFiles[fIndex].apiData = json.data;
+        files = newFiles;
+      }
+    } catch (err) {
+      console.error('Slice API error', err);
+    }
+  }
 
   function handleGlobalColorChange(newColorId: string) {
     selectedColorId = newColorId;
@@ -412,6 +477,15 @@
            focusCamera();
          }
        }, 50);
+       
+       // Trigger backend slicing
+       for (const f of validFiles) {
+          // Find the newly added file UUID
+          const addedFile = files.find(fl => fl.file === f);
+          if (addedFile) {
+             sliceFile(addedFile.meshUuid);
+          }
+       }
     }
   }
 

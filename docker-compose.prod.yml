@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    # Notice we DO NOT expose ports here. The app is completely hidden from the outside world.
+    # Only Caddy can talk to it over the internal Docker network.
+    environment:
+      - HOST=0.0.0.0
+      - PORT=4321
+    # Load all sensitive secrets (like SMTP details) directly from your .env file
+    env_file:
+      - .env
+    restart: always
+
+  caddy:
+    image: caddy:2-alpine
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      # Caddy needs persistent volumes to store auto-generated SSL certificates!
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+
+volumes:
+  caddy_data:
+  caddy_config:

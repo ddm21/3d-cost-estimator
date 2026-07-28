@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    ports:
+      - "4321:4321"
+    environment:
+      - HOST=0.0.0.0
+      - PORT=4321
+      - PUBLIC_CURRENCY_SYMBOL=₹
+      - PUBLIC_CURRENCY_CODE=INR
+    # In local development with Docker, we expose the port directly
+    # so you can visit http://localhost:4321
+    restart: unless-stopped

@@ -55,7 +55,7 @@ export const POST: APIRoute = async ({ request }) => {
         
         <div style="background-color: #f3f4f6; padding: 16px; border-radius: 8px; font-size: 18px;">
           <strong>Total Estimated Cost:</strong> 
-          <span style="color: #4f46e5;">${import.meta.env.PUBLIC_CURRENCY_SYMBOL || '$'}${data.totalCost}</span>
+          <span style="color: #4f46e5;">${import.meta.env.PUBLIC_CURRENCY_SYMBOL || '₹'}${data.totalCost}</span>
         </div>
       </div>
     `;
@@ -64,7 +64,7 @@ export const POST: APIRoute = async ({ request }) => {
     await transporter.sendMail({
       from: `"${config.brand.name} Estimator" <${import.meta.env.SMTP_USER}>`,
       to: config.brand.contactEmail,
-      subject: `[New Quote] ${data.name} - ${import.meta.env.PUBLIC_CURRENCY_SYMBOL || '$'}${data.totalCost}`,
+      subject: `[New Quote] ${data.name} - ${import.meta.env.PUBLIC_CURRENCY_SYMBOL || '₹'}${data.totalCost}`,
       replyTo: data.email,
       html: htmlContent,
     });
